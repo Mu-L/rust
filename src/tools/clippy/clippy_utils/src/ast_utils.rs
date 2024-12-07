@@ -661,8 +661,8 @@ pub fn eq_generics(l: &Generics, r: &Generics) -> bool {
 }
 
 pub fn eq_where_predicate(l: &WherePredicate, r: &WherePredicate) -> bool {
-    use WherePredicate::*;
-    match (l, r) {
+    use WherePredicateKind::*;
+    match (&l.kind, &r.kind) {
         (BoundPredicate(l), BoundPredicate(r)) => {
             over(&l.bound_generic_params, &r.bound_generic_params, |l, r| {
                 eq_generic_param(l, r)
@@ -872,8 +872,8 @@ pub fn eq_attr_args(l: &AttrArgs, r: &AttrArgs) -> bool {
     match (l, r) {
         (Empty, Empty) => true,
         (Delimited(la), Delimited(ra)) => eq_delim_args(la, ra),
-        (Eq(_, AttrArgsEq::Ast(le)), Eq(_, AttrArgsEq::Ast(re))) => eq_expr(le, re),
-        (Eq(_, AttrArgsEq::Hir(ll)), Eq(_, AttrArgsEq::Hir(rl))) => ll.kind == rl.kind,
+        (Eq { value: AttrArgsEq::Ast(le), .. }, Eq{ value: AttrArgsEq::Ast(re), .. }) => eq_expr(le, re),
+        (Eq { value: AttrArgsEq::Hir(ll), .. }, Eq{ value: AttrArgsEq::Hir(rl), .. }) => ll.kind == rl.kind,
         _ => false,
     }
 }

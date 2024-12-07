@@ -17,10 +17,13 @@ use super::{Analysis, ResultsCursor, ResultsVisitor, graphviz, visit_results};
 use crate::errors::{
     DuplicateValuesFor, PathMustEndInFilename, RequiresAnArgument, UnknownFormatter,
 };
+use crate::framework::cursor::ResultsHandle;
 
 pub type EntrySets<'tcx, A> = IndexVec<BasicBlock, <A as Analysis<'tcx>>::Domain>;
 
-/// A dataflow analysis that has converged to fixpoint.
+/// A dataflow analysis that has converged to fixpoint. It only holds the domain values at the
+/// entry of each basic block. Domain values in other parts of the block are recomputed on the fly
+/// by visitors (i.e. `ResultsCursor`, or `ResultsVisitor` impls).
 #[derive(Clone)]
 pub struct Results<'tcx, A>
 where
@@ -34,12 +37,21 @@ impl<'tcx, A> Results<'tcx, A>
 where
     A: Analysis<'tcx>,
 {
-    /// Creates a `ResultsCursor` that can inspect these `Results`.
+    /// Creates a `ResultsCursor` that mutably borrows the `Results`, which is appropriate when the
+    /// `Results` is also used outside the cursor.
+    pub fn as_results_cursor<'mir>(
+        &'mir mut self,
+        body: &'mir mir::Body<'tcx>,
+    ) -> ResultsCursor<'mir, 'tcx, A> {
+        ResultsCursor::new(body, ResultsHandle::BorrowedMut(self))
+    }
+
+    /// Creates a `ResultsCursor` that takes ownership of the `Results`.
     pub fn into_results_cursor<'mir>(
         self,
         body: &'mir mir::Body<'tcx>,
     ) -> ResultsCursor<'mir, 'tcx, A> {
-        ResultsCursor::new(body, self)
+        ResultsCursor::new(body, ResultsHandle::Owned(self))
     }
 
     /// Gets the dataflow state for the given block.
@@ -74,9 +86,9 @@ where
 pub(super) fn write_graphviz_results<'tcx, A>(
     tcx: TyCtxt<'tcx>,
     body: &mir::Body<'tcx>,
-    results: Results<'tcx, A>,
+    results: &mut Results<'tcx, A>,
     pass_name: Option<&'static str>,
-) -> (std::io::Result<()>, Results<'tcx, A>)
+) -> std::io::Result<()>
 where
     A: Analysis<'tcx>,
     A::Domain: DebugWithContext<A>,
@@ -87,7 +99,7 @@ where
     let def_id = body.source.def_id();
     let Ok(attrs) = RustcMirAttrs::parse(tcx, def_id) else {
         // Invalid `rustc_mir` attrs are reported in `RustcMirAttrs::parse`
-        return (Ok(()), results);
+        return Ok(());
     };
 
     let file = try {
@@ -104,12 +116,12 @@ where
                 create_dump_file(tcx, "dot", false, A::NAME, &pass_name.unwrap_or("-----"), body)?
             }
 
-            _ => return (Ok(()), results),
+            _ => return Ok(()),
         }
     };
     let mut file = match file {
         Ok(f) => f,
-        Err(e) => return (Err(e), results),
+        Err(e) => return Err(e),
     };
 
     let style = match attrs.formatter {
@@ -132,7 +144,7 @@ where
         file.write_all(&buf)?;
     };
 
-    (lhs, graphviz.into_results())
+    lhs
 }
 
 #[derive(Default)]

@@ -394,7 +394,6 @@ mod desc {
     pub(crate) const parse_collapse_macro_debuginfo: &str = "one of `no`, `external`, or `yes`";
     pub(crate) const parse_strip: &str = "either `none`, `debuginfo`, or `symbols`";
     pub(crate) const parse_linker_flavor: &str = ::rustc_target::spec::LinkerFlavorCli::one_of();
-    pub(crate) const parse_optimization_fuel: &str = "crate=integer";
     pub(crate) const parse_dump_mono_stats: &str = "`markdown` (default) or `json`";
     pub(crate) const parse_instrument_coverage: &str = parse_bool;
     pub(crate) const parse_coverage_options: &str =
@@ -946,21 +945,6 @@ pub mod parse {
             }
         }
         true
-    }
-
-    pub(crate) fn parse_optimization_fuel(
-        slot: &mut Option<(String, u64)>,
-        v: Option<&str>,
-    ) -> bool {
-        match v {
-            None => false,
-            Some(s) => {
-                let [crate_name, fuel] = *s.split('=').collect::<Vec<_>>() else { return false };
-                let Ok(fuel) = fuel.parse::<u64>() else { return false };
-                *slot = Some((crate_name.to_string(), fuel));
-                true
-            }
-        }
     }
 
     pub(crate) fn parse_unpretty(slot: &mut Option<String>, v: Option<&str>) -> bool {
@@ -1718,6 +1702,8 @@ options! {
         "threshold to allow cross crate inlining of functions"),
     debug_info_for_profiling: bool = (false, parse_bool, [TRACKED],
         "emit discriminators and other data necessary for AutoFDO"),
+    debug_info_type_line_numbers: bool = (false, parse_bool, [TRACKED],
+        "emit type and line information for additional data types (default: no)"),
     debuginfo_compression: DebugInfoCompression = (DebugInfoCompression::None, parse_debuginfo_compression, [TRACKED],
         "compress debug info sections (none, zlib, zstd, default: none)"),
     deduplicate_diagnostics: bool = (true, parse_bool, [UNTRACKED],
@@ -1794,8 +1780,6 @@ options! {
         `shallow` prints only type names, `none` prints nothing and disables `{:?}`. (default: `full`)"),
     force_unstable_if_unmarked: bool = (false, parse_bool, [TRACKED],
         "force all crates to be `rustc_private` unstable (default: no)"),
-    fuel: Option<(String, u64)> = (None, parse_optimization_fuel, [TRACKED],
-        "set the optimization fuel quota for a crate"),
     function_return: FunctionReturn = (FunctionReturn::default(), parse_function_return, [TRACKED],
         "replace returns with jumps to `__x86_return_thunk` (default: `keep`)"),
     function_sections: Option<bool> = (None, parse_opt_bool, [TRACKED],
@@ -1955,8 +1939,9 @@ options! {
         "support compiling tests with panic=abort (default: no)"),
     panic_in_drop: PanicStrategy = (PanicStrategy::Unwind, parse_panic_strategy, [TRACKED],
         "panic strategy for panics in drops"),
-    parse_only: bool = (false, parse_bool, [UNTRACKED],
-        "parse only; do not compile, assemble, or link (default: no)"),
+    parse_crate_root_only: bool = (false, parse_bool, [UNTRACKED],
+        "parse the crate root file only; do not parse other files, compile, assemble, or link \
+        (default: no)"),
     patchable_function_entry: PatchableFunctionEntry = (PatchableFunctionEntry::default(), parse_patchable_function_entry, [TRACKED],
         "nop padding at function entry"),
     plt: Option<bool> = (None, parse_opt_bool, [TRACKED],
@@ -1965,8 +1950,6 @@ options! {
         (default: PLT is disabled if full relro is enabled on x86_64)"),
     polonius: Polonius = (Polonius::default(), parse_polonius, [TRACKED],
         "enable polonius-based borrow-checker (default: no)"),
-    polymorphize: bool = (false, parse_bool, [TRACKED],
-          "perform polymorphization analysis"),
     pre_link_arg: (/* redirected to pre_link_args */) = ((), parse_string_push, [UNTRACKED],
         "a single extra argument to prepend the linker invocation (can be used several times)"),
     pre_link_args: Vec<String> = (Vec::new(), parse_list, [UNTRACKED],
@@ -1978,8 +1961,6 @@ options! {
     #[rustc_lint_opt_deny_field_access("use `Session::print_codegen_stats` instead of this field")]
     print_codegen_stats: bool = (false, parse_bool, [UNTRACKED],
         "print codegen statistics (default: no)"),
-    print_fuel: Option<String> = (None, parse_opt_string, [TRACKED],
-        "make rustc print the total optimization fuel used by a crate"),
     print_llvm_passes: bool = (false, parse_bool, [UNTRACKED],
         "print the LLVM optimization passes being run (default: no)"),
     print_mono_items: Option<String> = (None, parse_opt_string, [UNTRACKED],
@@ -2005,6 +1986,9 @@ options! {
         "enable queries of the dependency graph for regression testing (default: no)"),
     randomize_layout: bool = (false, parse_bool, [TRACKED],
         "randomize the layout of types (default: no)"),
+    reg_struct_return: bool = (false, parse_bool, [TRACKED],
+        "On x86-32 targets, it overrides the default ABI to return small structs in registers.
+        It is UNSOUND to link together crates that use different values for this flag!"),
     regparm: Option<u32> = (None, parse_opt_number, [TRACKED],
         "On x86-32 targets, setting this to N causes the compiler to pass N arguments \
         in registers EAX, EDX, and ECX instead of on the stack for\
@@ -2055,8 +2039,6 @@ written to standard error output)"),
         "make the current crate share its generic instantiations"),
     shell_argfiles: bool = (false, parse_bool, [UNTRACKED],
         "allow argument files to be specified with POSIX \"shell-style\" argument quoting"),
-    show_span: Option<String> = (None, parse_opt_string, [TRACKED],
-        "show spans for compiler debugging (expr|pat|ty)"),
     simulate_remapped_rust_src_base: Option<PathBuf> = (None, parse_opt_pathbuf, [TRACKED],
         "simulate the effect of remap-debuginfo = true at bootstrapping by remapping path \
         to rust's source base directory. only meant for testing purposes"),

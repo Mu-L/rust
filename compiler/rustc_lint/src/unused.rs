@@ -1304,12 +1304,12 @@ impl EarlyLintPass for UnusedParens {
     }
 
     fn enter_where_predicate(&mut self, _: &EarlyContext<'_>, pred: &ast::WherePredicate) {
-        use rustc_ast::{WhereBoundPredicate, WherePredicate};
-        if let WherePredicate::BoundPredicate(WhereBoundPredicate {
+        use rustc_ast::{WhereBoundPredicate, WherePredicateKind};
+        if let WherePredicateKind::BoundPredicate(WhereBoundPredicate {
             bounded_ty,
             bound_generic_params,
             ..
-        }) = pred
+        }) = &pred.kind
             && let ast::TyKind::Paren(_) = &bounded_ty.kind
             && bound_generic_params.is_empty()
         {
@@ -1563,7 +1563,7 @@ impl UnusedImportBraces {
                     }
                     rename.unwrap_or(orig_ident).name
                 }
-                ast::UseTreeKind::Glob => Symbol::intern("*"),
+                ast::UseTreeKind::Glob => sym::asterisk,
                 ast::UseTreeKind::Nested { .. } => return,
             };
 

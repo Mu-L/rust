@@ -300,7 +300,7 @@ impl<'a> LintDiagnostic<'a, ()> for BuiltinTypeAliasBounds<'_> {
         let affect_object_lifetime_defaults = self
             .preds
             .iter()
-            .filter(|pred| pred.in_where_clause() == self.in_where_clause)
+            .filter(|pred| pred.kind.in_where_clause() == self.in_where_clause)
             .any(|pred| TypeAliasBounds::affects_object_lifetime_defaults(pred));
 
         // If there are any shorthand assoc tys, then the bounds can't be removed automatically.
@@ -906,6 +906,11 @@ pub(crate) struct QueryUntracked {
 #[derive(LintDiagnostic)]
 #[diag(lint_span_use_eq_ctxt)]
 pub(crate) struct SpanUseEqCtxtDiag;
+
+#[derive(LintDiagnostic)]
+#[diag(lint_symbol_intern_string_literal)]
+#[help]
+pub(crate) struct SymbolInternStringLiteralDiag;
 
 #[derive(LintDiagnostic)]
 #[diag(lint_tykind_kind)]
@@ -1808,6 +1813,42 @@ pub(crate) enum AmbiguousWidePointerComparisonsAddrSuggestion<'a> {
         #[suggestion_part(code = "{r_modifiers}{paren_right}.cast::<()>()")]
         right_after: Span,
     },
+}
+
+#[derive(LintDiagnostic)]
+pub(crate) enum UnpredictableFunctionPointerComparisons<'a> {
+    #[diag(lint_unpredictable_fn_pointer_comparisons)]
+    #[note(lint_note_duplicated_fn)]
+    #[note(lint_note_deduplicated_fn)]
+    #[note(lint_note_visit_fn_addr_eq)]
+    Suggestion {
+        #[subdiagnostic]
+        sugg: UnpredictableFunctionPointerComparisonsSuggestion<'a>,
+    },
+    #[diag(lint_unpredictable_fn_pointer_comparisons)]
+    #[note(lint_note_duplicated_fn)]
+    #[note(lint_note_deduplicated_fn)]
+    #[note(lint_note_visit_fn_addr_eq)]
+    Warn,
+}
+
+#[derive(Subdiagnostic)]
+#[multipart_suggestion(
+    lint_fn_addr_eq_suggestion,
+    style = "verbose",
+    applicability = "maybe-incorrect"
+)]
+pub(crate) struct UnpredictableFunctionPointerComparisonsSuggestion<'a> {
+    pub ne: &'a str,
+    pub cast_right: String,
+    pub deref_left: &'a str,
+    pub deref_right: &'a str,
+    #[suggestion_part(code = "{ne}std::ptr::fn_addr_eq({deref_left}")]
+    pub left: Span,
+    #[suggestion_part(code = ", {deref_right}")]
+    pub middle: Span,
+    #[suggestion_part(code = "{cast_right})")]
+    pub right: Span,
 }
 
 pub(crate) struct ImproperCTypes<'a> {
@@ -3056,6 +3097,13 @@ pub(crate) struct UnqualifiedLocalImportsDiag {}
 #[derive(LintDiagnostic)]
 #[diag(lint_reserved_string)]
 pub(crate) struct ReservedString {
+    #[suggestion(code = " ", applicability = "machine-applicable")]
+    pub suggestion: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(lint_reserved_multihash)]
+pub(crate) struct ReservedMultihash {
     #[suggestion(code = " ", applicability = "machine-applicable")]
     pub suggestion: Span,
 }
