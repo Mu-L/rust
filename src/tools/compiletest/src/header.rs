@@ -115,17 +115,12 @@ pub struct TestProps {
     pub dont_check_compiler_stdout: bool,
     // For UI tests, allows compiler to generate arbitrary output to stderr
     pub dont_check_compiler_stderr: bool,
-    // When checking the output of stdout or stderr check
-    // that the lines of expected output are a subset of the actual output.
-    pub compare_output_lines_by_subset: bool,
     // Don't force a --crate-type=dylib flag on the command line
     //
     // Set this for example if you have an auxiliary test file that contains
     // a proc-macro and needs `#![crate_type = "proc-macro"]`. This ensures
     // that the aux file is compiled as a `proc-macro` and not as a `dylib`.
     pub no_prefer_dynamic: bool,
-    // Run -Zunpretty expanded when running pretty printing tests
-    pub pretty_expanded: bool,
     // Which pretty mode are we testing with, default to 'normal'
     pub pretty_mode: String,
     // Only compare pretty output and don't try compiling
@@ -218,12 +213,12 @@ mod directives {
     pub const DONT_CHECK_COMPILER_STDOUT: &'static str = "dont-check-compiler-stdout";
     pub const DONT_CHECK_COMPILER_STDERR: &'static str = "dont-check-compiler-stderr";
     pub const NO_PREFER_DYNAMIC: &'static str = "no-prefer-dynamic";
-    pub const PRETTY_EXPANDED: &'static str = "pretty-expanded";
     pub const PRETTY_MODE: &'static str = "pretty-mode";
     pub const PRETTY_COMPARE_ONLY: &'static str = "pretty-compare-only";
     pub const AUX_BIN: &'static str = "aux-bin";
     pub const AUX_BUILD: &'static str = "aux-build";
     pub const AUX_CRATE: &'static str = "aux-crate";
+    pub const PROC_MACRO: &'static str = "proc-macro";
     pub const AUX_CODEGEN_BACKEND: &'static str = "aux-codegen-backend";
     pub const EXEC_ENV: &'static str = "exec-env";
     pub const RUSTC_ENV: &'static str = "rustc-env";
@@ -242,7 +237,6 @@ mod directives {
     pub const KNOWN_BUG: &'static str = "known-bug";
     pub const TEST_MIR_PASS: &'static str = "test-mir-pass";
     pub const REMAP_SRC_BASE: &'static str = "remap-src-base";
-    pub const COMPARE_OUTPUT_LINES_BY_SUBSET: &'static str = "compare-output-lines-by-subset";
     pub const LLVM_COV_FLAGS: &'static str = "llvm-cov-flags";
     pub const FILECHECK_FLAGS: &'static str = "filecheck-flags";
     pub const NO_AUTO_CHECK_CFG: &'static str = "no-auto-check-cfg";
@@ -276,9 +270,7 @@ impl TestProps {
             check_run_results: false,
             dont_check_compiler_stdout: false,
             dont_check_compiler_stderr: false,
-            compare_output_lines_by_subset: false,
             no_prefer_dynamic: false,
-            pretty_expanded: false,
             pretty_mode: "normal".to_string(),
             pretty_compare_only: false,
             forbid_output: vec![],
@@ -425,7 +417,6 @@ impl TestProps {
                         &mut self.dont_check_compiler_stderr,
                     );
                     config.set_name_directive(ln, NO_PREFER_DYNAMIC, &mut self.no_prefer_dynamic);
-                    config.set_name_directive(ln, PRETTY_EXPANDED, &mut self.pretty_expanded);
 
                     if let Some(m) = config.parse_name_value_directive(ln, PRETTY_MODE) {
                         self.pretty_mode = m;
@@ -554,11 +545,6 @@ impl TestProps {
                         |s| s.trim().to_string(),
                     );
                     config.set_name_directive(ln, REMAP_SRC_BASE, &mut self.remap_src_base);
-                    config.set_name_directive(
-                        ln,
-                        COMPARE_OUTPUT_LINES_BY_SUBSET,
-                        &mut self.compare_output_lines_by_subset,
-                    );
 
                     if let Some(flags) = config.parse_name_value_directive(ln, LLVM_COV_FLAGS) {
                         self.llvm_cov_flags.extend(split_flags(&flags));
@@ -1139,6 +1125,8 @@ fn parse_normalize_rule(header: &str) -> Option<(String, String)> {
     .captures(header)?;
     let regex = captures["regex"].to_owned();
     let replacement = captures["replacement"].to_owned();
+    // FIXME: Support escaped new-line in strings.
+    let replacement = replacement.replace("\\n", "\n");
     Some((regex, replacement))
 }
 

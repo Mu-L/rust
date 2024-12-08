@@ -39,7 +39,7 @@ pub use crate::format::*;
 use crate::ptr::P;
 use crate::token::{self, CommentKind, Delimiter};
 use crate::tokenstream::{DelimSpan, LazyAttrTokenStream, TokenStream};
-pub use crate::util::parser::ExprPrecedence;
+use crate::util::parser::{AssocOp, ExprPrecedence};
 
 /// A "Label" is an identifier of some point in sources,
 /// e.g. in the following code:
@@ -428,7 +428,15 @@ impl Default for WhereClause {
 
 /// A single predicate in a where-clause.
 #[derive(Clone, Encodable, Decodable, Debug)]
-pub enum WherePredicate {
+pub struct WherePredicate {
+    pub kind: WherePredicateKind,
+    pub id: NodeId,
+    pub span: Span,
+}
+
+/// Predicate kind in where-clause.
+#[derive(Clone, Encodable, Decodable, Debug)]
+pub enum WherePredicateKind {
     /// A type bound (e.g., `for<'c> Foo: Send + Clone + 'c`).
     BoundPredicate(WhereBoundPredicate),
     /// A lifetime predicate (e.g., `'a: 'b + 'c`).
@@ -437,22 +445,11 @@ pub enum WherePredicate {
     EqPredicate(WhereEqPredicate),
 }
 
-impl WherePredicate {
-    pub fn span(&self) -> Span {
-        match self {
-            WherePredicate::BoundPredicate(p) => p.span,
-            WherePredicate::RegionPredicate(p) => p.span,
-            WherePredicate::EqPredicate(p) => p.span,
-        }
-    }
-}
-
 /// A type bound.
 ///
 /// E.g., `for<'c> Foo: Send + Clone + 'c`.
 #[derive(Clone, Encodable, Decodable, Debug)]
 pub struct WhereBoundPredicate {
-    pub span: Span,
     /// Any generics from a `for` binding.
     pub bound_generic_params: ThinVec<GenericParam>,
     /// The type being bounded.
@@ -466,7 +463,6 @@ pub struct WhereBoundPredicate {
 /// E.g., `'a: 'b + 'c`.
 #[derive(Clone, Encodable, Decodable, Debug)]
 pub struct WhereRegionPredicate {
-    pub span: Span,
     pub lifetime: Lifetime,
     pub bounds: GenericBounds,
 }
@@ -476,7 +472,6 @@ pub struct WhereRegionPredicate {
 /// E.g., `T = int`.
 #[derive(Clone, Encodable, Decodable, Debug)]
 pub struct WhereEqPredicate {
-    pub span: Span,
     pub lhs_ty: P<Ty>,
     pub rhs_ty: P<Ty>,
 }
@@ -1187,14 +1182,15 @@ pub struct Expr {
 }
 
 impl Expr {
-    /// Is this expr either `N`, or `{ N }`.
+    /// Could this expr be either `N`, or `{ N }`, where `N` is a const parameter.
     ///
     /// If this is not the case, name resolution does not resolve `N` when using
     /// `min_const_generics` as more complex expressions are not supported.
     ///
     /// Does not ensure that the path resolves to a const param, the caller should check this.
-    pub fn is_potential_trivial_const_arg(&self, strip_identity_block: bool) -> bool {
-        let this = if strip_identity_block { self.maybe_unwrap_block() } else { self };
+    /// This also does not consider macros, so it's only correct after macro-expansion.
+    pub fn is_potential_trivial_const_arg(&self) -> bool {
+        let this = self.maybe_unwrap_block();
 
         if let ExprKind::Path(None, path) = &this.kind
             && path.is_potential_trivial_const_arg()
@@ -1321,51 +1317,69 @@ impl Expr {
 
     pub fn precedence(&self) -> ExprPrecedence {
         match self.kind {
-            ExprKind::Array(_) => ExprPrecedence::Array,
-            ExprKind::ConstBlock(_) => ExprPrecedence::ConstBlock,
-            ExprKind::Call(..) => ExprPrecedence::Call,
-            ExprKind::MethodCall(..) => ExprPrecedence::MethodCall,
-            ExprKind::Tup(_) => ExprPrecedence::Tup,
-            ExprKind::Binary(op, ..) => ExprPrecedence::Binary(op.node),
-            ExprKind::Unary(..) => ExprPrecedence::Unary,
-            ExprKind::Lit(_) | ExprKind::IncludedBytes(..) => ExprPrecedence::Lit,
-            ExprKind::Cast(..) => ExprPrecedence::Cast,
-            ExprKind::Let(..) => ExprPrecedence::Let,
-            ExprKind::If(..) => ExprPrecedence::If,
-            ExprKind::While(..) => ExprPrecedence::While,
-            ExprKind::ForLoop { .. } => ExprPrecedence::ForLoop,
-            ExprKind::Loop(..) => ExprPrecedence::Loop,
-            ExprKind::Match(_, _, MatchKind::Prefix) => ExprPrecedence::Match,
-            ExprKind::Match(_, _, MatchKind::Postfix) => ExprPrecedence::PostfixMatch,
             ExprKind::Closure(..) => ExprPrecedence::Closure,
-            ExprKind::Block(..) => ExprPrecedence::Block,
-            ExprKind::TryBlock(..) => ExprPrecedence::TryBlock,
-            ExprKind::Gen(..) => ExprPrecedence::Gen,
-            ExprKind::Await(..) => ExprPrecedence::Await,
-            ExprKind::Assign(..) => ExprPrecedence::Assign,
-            ExprKind::AssignOp(..) => ExprPrecedence::AssignOp,
-            ExprKind::Field(..) => ExprPrecedence::Field,
-            ExprKind::Index(..) => ExprPrecedence::Index,
+
+            ExprKind::Break(..)
+            | ExprKind::Continue(..)
+            | ExprKind::Ret(..)
+            | ExprKind::Yield(..)
+            | ExprKind::Yeet(..)
+            | ExprKind::Become(..) => ExprPrecedence::Jump,
+
+            // `Range` claims to have higher precedence than `Assign`, but `x .. x = x` fails to
+            // parse, instead of parsing as `(x .. x) = x`. Giving `Range` a lower precedence
+            // ensures that `pprust` will add parentheses in the right places to get the desired
+            // parse.
             ExprKind::Range(..) => ExprPrecedence::Range,
-            ExprKind::Underscore => ExprPrecedence::Path,
-            ExprKind::Path(..) => ExprPrecedence::Path,
-            ExprKind::AddrOf(..) => ExprPrecedence::AddrOf,
-            ExprKind::Break(..) => ExprPrecedence::Break,
-            ExprKind::Continue(..) => ExprPrecedence::Continue,
-            ExprKind::Ret(..) => ExprPrecedence::Ret,
-            ExprKind::Struct(..) => ExprPrecedence::Struct,
-            ExprKind::Repeat(..) => ExprPrecedence::Repeat,
-            ExprKind::Paren(..) => ExprPrecedence::Paren,
-            ExprKind::Try(..) => ExprPrecedence::Try,
-            ExprKind::Yield(..) => ExprPrecedence::Yield,
-            ExprKind::Yeet(..) => ExprPrecedence::Yeet,
-            ExprKind::Become(..) => ExprPrecedence::Become,
-            ExprKind::InlineAsm(..)
-            | ExprKind::Type(..)
-            | ExprKind::OffsetOf(..)
+
+            // Binop-like expr kinds, handled by `AssocOp`.
+            ExprKind::Binary(op, ..) => AssocOp::from_ast_binop(op.node).precedence(),
+            ExprKind::Cast(..) => ExprPrecedence::Cast,
+
+            ExprKind::Assign(..) |
+            ExprKind::AssignOp(..) => ExprPrecedence::Assign,
+
+            // Unary, prefix
+            ExprKind::AddrOf(..)
+            // Here `let pats = expr` has `let pats =` as a "unary" prefix of `expr`.
+            // However, this is not exactly right. When `let _ = a` is the LHS of a binop we
+            // need parens sometimes. E.g. we can print `(let _ = a) && b` as `let _ = a && b`
+            // but we need to print `(let _ = a) < b` as-is with parens.
+            | ExprKind::Let(..)
+            | ExprKind::Unary(..) => ExprPrecedence::Prefix,
+
+            // Never need parens
+            ExprKind::Array(_)
+            | ExprKind::Await(..)
+            | ExprKind::Block(..)
+            | ExprKind::Call(..)
+            | ExprKind::ConstBlock(_)
+            | ExprKind::Field(..)
+            | ExprKind::ForLoop { .. }
             | ExprKind::FormatArgs(..)
-            | ExprKind::MacCall(..) => ExprPrecedence::Mac,
-            ExprKind::Err(_) | ExprKind::Dummy => ExprPrecedence::Err,
+            | ExprKind::Gen(..)
+            | ExprKind::If(..)
+            | ExprKind::IncludedBytes(..)
+            | ExprKind::Index(..)
+            | ExprKind::InlineAsm(..)
+            | ExprKind::Lit(_)
+            | ExprKind::Loop(..)
+            | ExprKind::MacCall(..)
+            | ExprKind::Match(..)
+            | ExprKind::MethodCall(..)
+            | ExprKind::OffsetOf(..)
+            | ExprKind::Paren(..)
+            | ExprKind::Path(..)
+            | ExprKind::Repeat(..)
+            | ExprKind::Struct(..)
+            | ExprKind::Try(..)
+            | ExprKind::TryBlock(..)
+            | ExprKind::Tup(_)
+            | ExprKind::Type(..)
+            | ExprKind::Underscore
+            | ExprKind::While(..)
+            | ExprKind::Err(_)
+            | ExprKind::Dummy => ExprPrecedence::Unambiguous,
         }
     }
 
@@ -1717,12 +1731,12 @@ pub enum AttrArgs {
     /// Delimited arguments: `#[attr()/[]/{}]`.
     Delimited(DelimArgs),
     /// Arguments of a key-value attribute: `#[attr = "value"]`.
-    Eq(
+    Eq {
         /// Span of the `=` token.
-        Span,
-        /// The "value".
-        AttrArgsEq,
-    ),
+        eq_span: Span,
+
+        value: AttrArgsEq,
+    },
 }
 
 // The RHS of an `AttrArgs::Eq` starts out as an expression. Once macro
@@ -1734,15 +1748,39 @@ pub enum AttrArgsEq {
     Hir(MetaItemLit),
 }
 
+impl AttrArgsEq {
+    pub fn span(&self) -> Span {
+        match self {
+            AttrArgsEq::Ast(p) => p.span,
+            AttrArgsEq::Hir(lit) => lit.span,
+        }
+    }
+
+    pub fn unwrap_ast(&self) -> &Expr {
+        match self {
+            AttrArgsEq::Ast(p) => p,
+            AttrArgsEq::Hir(lit) => {
+                unreachable!("in literal form when getting inner tokens: {lit:?}")
+            }
+        }
+    }
+
+    pub fn unwrap_ast_mut(&mut self) -> &mut P<Expr> {
+        match self {
+            AttrArgsEq::Ast(p) => p,
+            AttrArgsEq::Hir(lit) => {
+                unreachable!("in literal form when getting inner tokens: {lit:?}")
+            }
+        }
+    }
+}
+
 impl AttrArgs {
     pub fn span(&self) -> Option<Span> {
         match self {
             AttrArgs::Empty => None,
             AttrArgs::Delimited(args) => Some(args.dspan.entire()),
-            AttrArgs::Eq(eq_span, AttrArgsEq::Ast(expr)) => Some(eq_span.to(expr.span)),
-            AttrArgs::Eq(_, AttrArgsEq::Hir(lit)) => {
-                unreachable!("in literal form when getting span: {:?}", lit);
-            }
+            AttrArgs::Eq { eq_span, value } => Some(eq_span.to(value.span())),
         }
     }
 
@@ -1752,10 +1790,7 @@ impl AttrArgs {
         match self {
             AttrArgs::Empty => TokenStream::default(),
             AttrArgs::Delimited(args) => args.tokens.clone(),
-            AttrArgs::Eq(_, AttrArgsEq::Ast(expr)) => TokenStream::from_ast(expr),
-            AttrArgs::Eq(_, AttrArgsEq::Hir(lit)) => {
-                unreachable!("in literal form when getting inner tokens: {:?}", lit)
-            }
+            AttrArgs::Eq { value, .. } => TokenStream::from_ast(value.unwrap_ast()),
         }
     }
 }
@@ -1769,10 +1804,10 @@ where
         match self {
             AttrArgs::Empty => {}
             AttrArgs::Delimited(args) => args.hash_stable(ctx, hasher),
-            AttrArgs::Eq(_eq_span, AttrArgsEq::Ast(expr)) => {
+            AttrArgs::Eq { value: AttrArgsEq::Ast(expr), .. } => {
                 unreachable!("hash_stable {:?}", expr);
             }
-            AttrArgs::Eq(eq_span, AttrArgsEq::Hir(lit)) => {
+            AttrArgs::Eq { eq_span, value: AttrArgsEq::Hir(lit) } => {
                 eq_span.hash_stable(ctx, hasher);
                 lit.hash_stable(ctx, hasher);
             }
@@ -2529,6 +2564,18 @@ pub enum SelfKind {
     Region(Option<Lifetime>, Mutability),
     /// `self: TYPE`, `mut self: TYPE`
     Explicit(P<Ty>, Mutability),
+}
+
+impl SelfKind {
+    pub fn to_ref_suggestion(&self) -> String {
+        match self {
+            SelfKind::Region(None, mutbl) => mutbl.ref_prefix_str().to_string(),
+            SelfKind::Region(Some(lt), mutbl) => format!("&{lt} {}", mutbl.prefix_str()),
+            SelfKind::Value(_) | SelfKind::Explicit(_, _) => {
+                unreachable!("if we had an explicit self, we wouldn't be here")
+            }
+        }
+    }
 }
 
 pub type ExplicitSelf = Spanned<SelfKind>;

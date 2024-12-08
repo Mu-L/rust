@@ -2803,6 +2803,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
             }
             ObligationCauseCode::WhereClause(item_def_id, span)
             | ObligationCauseCode::WhereClauseInExpr(item_def_id, span, ..)
+            | ObligationCauseCode::HostEffectInExpr(item_def_id, span, ..)
                 if !span.is_dummy() =>
             {
                 if let ObligationCauseCode::WhereClauseInExpr(_, _, hir_id, pos) = &cause_code {
@@ -2966,7 +2967,9 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                     err.help(help);
                 }
             }
-            ObligationCauseCode::WhereClause(..) | ObligationCauseCode::WhereClauseInExpr(..) => {
+            ObligationCauseCode::WhereClause(..)
+            | ObligationCauseCode::WhereClauseInExpr(..)
+            | ObligationCauseCode::HostEffectInExpr(..) => {
                 // We hold the `DefId` of the item introducing the obligation, but displaying it
                 // doesn't add user usable information. It always point at an associated item.
             }
@@ -3835,6 +3838,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                 && self.predicate_must_hold_modulo_regions(&Obligation::misc(
                     tcx, expr.span, body_id, param_env, pred,
                 ))
+                && expr.span.hi() != rcvr.span.hi()
             {
                 err.span_suggestion_verbose(
                     expr.span.with_lo(rcvr.span.hi()),
@@ -4112,6 +4116,11 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                         // the expected is a projection that we need to resolve.
                         // && let Some(tail_ty) = typeck_results.expr_ty_opt(expr)
                         && expected_found.found.is_unit()
+                        // FIXME: this happens with macro calls. Need to figure out why the stmt
+                        // `println!();` doesn't include the `;` in its `Span`. (#133845)
+                        // We filter these out to avoid ICEs with debug assertions on caused by
+                        // empty suggestions.
+                        && expr.span.hi() != stmt.span.hi()
                     {
                         err.span_suggestion_verbose(
                             expr.span.shrink_to_hi().with_hi(stmt.span.hi()),
@@ -5312,9 +5321,10 @@ fn point_at_assoc_type_restriction<G: EmissionGuarantee>(
     };
     let name = tcx.item_name(proj.projection_term.def_id);
     let mut predicates = generics.predicates.iter().peekable();
-    let mut prev: Option<&hir::WhereBoundPredicate<'_>> = None;
+    let mut prev: Option<(&hir::WhereBoundPredicate<'_>, Span)> = None;
     while let Some(pred) = predicates.next() {
-        let hir::WherePredicate::BoundPredicate(pred) = pred else {
+        let curr_span = pred.span;
+        let hir::WherePredicateKind::BoundPredicate(pred) = pred.kind else {
             continue;
         };
         let mut bounds = pred.bounds.iter();
@@ -5340,8 +5350,8 @@ fn point_at_assoc_type_restriction<G: EmissionGuarantee>(
                         .iter()
                         .filter(|p| {
                             matches!(
-                                p,
-                                hir::WherePredicate::BoundPredicate(p)
+                                p.kind,
+                                hir::WherePredicateKind::BoundPredicate(p)
                                 if hir::PredicateOrigin::WhereClause == p.origin
                             )
                         })
@@ -5351,20 +5361,21 @@ fn point_at_assoc_type_restriction<G: EmissionGuarantee>(
                     // There's only one `where` bound, that needs to be removed. Remove the whole
                     // `where` clause.
                     generics.where_clause_span
-                } else if let Some(hir::WherePredicate::BoundPredicate(next)) = predicates.peek()
+                } else if let Some(next_pred) = predicates.peek()
+                    && let hir::WherePredicateKind::BoundPredicate(next) = next_pred.kind
                     && pred.origin == next.origin
                 {
                     // There's another bound, include the comma for the current one.
-                    pred.span.until(next.span)
-                } else if let Some(prev) = prev
+                    curr_span.until(next_pred.span)
+                } else if let Some((prev, prev_span)) = prev
                     && pred.origin == prev.origin
                 {
                     // Last bound, try to remove the previous comma.
-                    prev.span.shrink_to_hi().to(pred.span)
+                    prev_span.shrink_to_hi().to(curr_span)
                 } else if pred.origin == hir::PredicateOrigin::WhereClause {
-                    pred.span.with_hi(generics.where_clause_span.hi())
+                    curr_span.with_hi(generics.where_clause_span.hi())
                 } else {
-                    pred.span
+                    curr_span
                 };
 
                 err.span_suggestion_verbose(
@@ -5417,7 +5428,7 @@ fn point_at_assoc_type_restriction<G: EmissionGuarantee>(
                 );
             }
         }
-        prev = Some(pred);
+        prev = Some((pred, curr_span));
     }
 }
 

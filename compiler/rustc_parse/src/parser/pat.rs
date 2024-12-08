@@ -1,11 +1,13 @@
+use std::ops::Bound;
+
 use rustc_ast::mut_visit::{self, MutVisitor};
 use rustc_ast::ptr::P;
 use rustc_ast::token::{self, BinOpToken, Delimiter, IdentIsRaw, Token};
+use rustc_ast::util::parser::ExprPrecedence;
 use rustc_ast::visit::{self, Visitor};
 use rustc_ast::{
-    self as ast, Arm, AttrVec, BinOpKind, BindingMode, ByRef, Expr, ExprKind, ExprPrecedence,
-    LocalKind, MacCall, Mutability, Pat, PatField, PatFieldsRest, PatKind, Path, QSelf, RangeEnd,
-    RangeSyntax, Stmt, StmtKind,
+    self as ast, Arm, AttrVec, BindingMode, ByRef, Expr, ExprKind, LocalKind, MacCall, Mutability,
+    Pat, PatField, PatFieldsRest, PatKind, Path, QSelf, RangeEnd, RangeSyntax, Stmt, StmtKind,
 };
 use rustc_ast_pretty::pprust;
 use rustc_errors::{Applicability, Diag, DiagArgValue, PResult, StashKey};
@@ -434,8 +436,9 @@ impl<'a> Parser<'a> {
 
         // Parse an associative expression such as `+ expr`, `% expr`, ...
         // Assignments, ranges and `|` are disabled by [`Restrictions::IS_PAT`].
-        let Ok((expr, _)) =
-            snapshot.parse_expr_assoc_rest_with(0, false, expr).map_err(|err| err.cancel())
+        let Ok((expr, _)) = snapshot
+            .parse_expr_assoc_rest_with(Bound::Unbounded, false, expr)
+            .map_err(|err| err.cancel())
         else {
             // We got a trailing method/operator, but that wasn't an expression.
             return None;
@@ -458,7 +461,7 @@ impl<'a> Parser<'a> {
                 .create_err(UnexpectedExpressionInPattern {
                     span,
                     is_bound,
-                    expr_precedence: expr.precedence().order(),
+                    expr_precedence: expr.precedence(),
                 })
                 .stash(span, StashKey::ExprInPat)
                 .unwrap(),
@@ -544,9 +547,7 @@ impl<'a> Parser<'a> {
                             // HACK: a neater way would be preferable.
                             let expr = match &err.args["expr_precedence"] {
                                 DiagArgValue::Number(expr_precedence) => {
-                                    if *expr_precedence
-                                        <= ExprPrecedence::Binary(BinOpKind::Eq).order() as i32
-                                    {
+                                    if *expr_precedence <= ExprPrecedence::Compare as i32 {
                                         format!("({expr})")
                                     } else {
                                         format!("{expr}")
@@ -568,8 +569,7 @@ impl<'a> Parser<'a> {
                                 }
                                 Some(guard) => {
                                     // Are parentheses required around the old guard?
-                                    let wrap_guard = guard.precedence().order()
-                                        <= ExprPrecedence::Binary(BinOpKind::And).order();
+                                    let wrap_guard = guard.precedence() <= ExprPrecedence::LAnd;
 
                                     err.subdiagnostic(
                                         UnexpectedExpressionInPatternSugg::UpdateGuard {
@@ -1086,7 +1086,9 @@ impl<'a> Parser<'a> {
             return;
         }
 
-        self.dcx().emit_err(RepeatedMutInPattern { span: lo.to(self.prev_token.span) });
+        let span = lo.to(self.prev_token.span);
+        let suggestion = span.with_hi(self.token.span.lo());
+        self.dcx().emit_err(RepeatedMutInPattern { span, suggestion });
     }
 
     /// Parse macro invocation

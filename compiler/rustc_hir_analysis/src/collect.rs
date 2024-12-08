@@ -34,6 +34,7 @@ use rustc_infer::infer::{InferCtxt, TyCtxtInferExt};
 use rustc_infer::traits::ObligationCause;
 use rustc_middle::hir::nested_filter;
 use rustc_middle::query::Providers;
+use rustc_middle::ty::fold::fold_regions;
 use rustc_middle::ty::util::{Discr, IntTypeExt};
 use rustc_middle::ty::{self, AdtKind, Const, IsSuggestable, Ty, TyCtxt, TypingMode};
 use rustc_middle::{bug, span_bug};
@@ -150,11 +151,11 @@ impl<'v> Visitor<'v> for HirPlaceholderCollector {
             _ => {}
         }
     }
-    fn visit_array_length(&mut self, length: &'v hir::ArrayLen<'v>) {
-        if let hir::ArrayLen::Infer(inf) = length {
-            self.0.push(inf.span);
+    fn visit_const_arg(&mut self, const_arg: &'v hir::ConstArg<'v>) {
+        if let hir::ConstArgKind::Infer(span) = const_arg.kind {
+            self.0.push(span);
         }
-        intravisit::walk_array_len(self, length)
+        intravisit::walk_const_arg(self, const_arg)
     }
 }
 
@@ -308,10 +309,10 @@ impl<'tcx> Visitor<'tcx> for CollectItemTypesVisitor<'tcx> {
                     self.tcx.ensure().type_of(param.def_id);
                     if let Some(default) = default {
                         // need to store default and type of default
+                        self.tcx.ensure().const_param_default(param.def_id);
                         if let hir::ConstArgKind::Anon(ac) = default.kind {
                             self.tcx.ensure().type_of(ac.def_id);
                         }
-                        self.tcx.ensure().const_param_default(param.def_id);
                     }
                 }
             }
@@ -1415,7 +1416,7 @@ fn infer_return_ty_for_fn_sig<'tcx>(
                 GenericParamKind::Lifetime { .. } => true,
                 _ => false,
             });
-            let fn_sig = tcx.fold_regions(fn_sig, |r, _| match *r {
+            let fn_sig = fold_regions(tcx, fn_sig, |r, _| match *r {
                 ty::ReErased => {
                     if has_region_params {
                         ty::Region::new_error_with_message(
@@ -1816,7 +1817,6 @@ fn const_param_default<'tcx>(
         ),
     };
     let icx = ItemCtxt::new(tcx, def_id);
-    // FIXME(const_generics): investigate which places do and don't need const ty feeding
-    let ct = icx.lowerer().lower_const_arg(default_ct, FeedConstTy::No);
+    let ct = icx.lowerer().lower_const_arg(default_ct, FeedConstTy::Param(def_id.to_def_id()));
     ty::EarlyBinder::bind(ct)
 }

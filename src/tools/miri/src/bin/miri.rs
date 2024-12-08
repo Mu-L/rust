@@ -73,51 +73,47 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
     fn after_analysis<'tcx>(
         &mut self,
         _: &rustc_interface::interface::Compiler,
-        queries: &'tcx rustc_interface::Queries<'tcx>,
+        tcx: TyCtxt<'tcx>,
     ) -> Compilation {
-        queries.global_ctxt().unwrap().enter(|tcx| {
-            if tcx.sess.dcx().has_errors_or_delayed_bugs().is_some() {
-                tcx.dcx().fatal("miri cannot be run on programs that fail compilation");
-            }
+        if tcx.sess.dcx().has_errors_or_delayed_bugs().is_some() {
+            tcx.dcx().fatal("miri cannot be run on programs that fail compilation");
+        }
 
-            let early_dcx = EarlyDiagCtxt::new(tcx.sess.opts.error_format);
-            init_late_loggers(&early_dcx, tcx);
-            if !tcx.crate_types().contains(&CrateType::Executable) {
-                tcx.dcx().fatal("miri only makes sense on bin crates");
-            }
+        let early_dcx = EarlyDiagCtxt::new(tcx.sess.opts.error_format);
+        init_late_loggers(&early_dcx, tcx);
+        if !tcx.crate_types().contains(&CrateType::Executable) {
+            tcx.dcx().fatal("miri only makes sense on bin crates");
+        }
 
-            let (entry_def_id, entry_type) = entry_fn(tcx);
-            let mut config = self.miri_config.clone();
+        let (entry_def_id, entry_type) = entry_fn(tcx);
+        let mut config = self.miri_config.clone();
 
-            // Add filename to `miri` arguments.
-            config.args.insert(0, tcx.sess.io.input.filestem().to_string());
+        // Add filename to `miri` arguments.
+        config.args.insert(0, tcx.sess.io.input.filestem().to_string());
 
-            // Adjust working directory for interpretation.
-            if let Some(cwd) = env::var_os("MIRI_CWD") {
-                env::set_current_dir(cwd).unwrap();
-            }
+        // Adjust working directory for interpretation.
+        if let Some(cwd) = env::var_os("MIRI_CWD") {
+            env::set_current_dir(cwd).unwrap();
+        }
 
-            if tcx.sess.opts.optimize != OptLevel::No {
-                tcx.dcx().warn("Miri does not support optimizations: the opt-level is ignored. The only effect \
+        if tcx.sess.opts.optimize != OptLevel::No {
+            tcx.dcx().warn("Miri does not support optimizations: the opt-level is ignored. The only effect \
                     of selecting a Cargo profile that enables optimizations (such as --release) is to apply \
                     its remaining settings, such as whether debug assertions and overflow checks are enabled.");
-            }
-            if tcx.sess.mir_opt_level() > 0 {
-                tcx.dcx().warn("You have explicitly enabled MIR optimizations, overriding Miri's default \
+        }
+        if tcx.sess.mir_opt_level() > 0 {
+            tcx.dcx().warn("You have explicitly enabled MIR optimizations, overriding Miri's default \
                     which is to completely disable them. Any optimizations may hide UB that Miri would \
                     otherwise detect, and it is not necessarily possible to predict what kind of UB will \
                     be missed. If you are enabling optimizations to make Miri run faster, we advise using \
                     cfg(miri) to shrink your workload instead. The performance benefit of enabling MIR \
                     optimizations is usually marginal at best.");
-            }
+        }
 
-            if let Some(return_code) = miri::eval_entry(tcx, entry_def_id, entry_type, config) {
-                std::process::exit(
-                    i32::try_from(return_code).expect("Return value was too large!"),
-                );
-            }
-            tcx.dcx().abort_if_errors();
-        });
+        if let Some(return_code) = miri::eval_entry(tcx, entry_def_id, entry_type, config) {
+            std::process::exit(i32::try_from(return_code).expect("Return value was too large!"));
+        }
+        tcx.dcx().abort_if_errors();
 
         Compilation::Stop
     }
@@ -193,20 +189,18 @@ impl rustc_driver::Callbacks for MiriBeRustCompilerCalls {
     fn after_analysis<'tcx>(
         &mut self,
         _: &rustc_interface::interface::Compiler,
-        queries: &'tcx rustc_interface::Queries<'tcx>,
+        tcx: TyCtxt<'tcx>,
     ) -> Compilation {
-        queries.global_ctxt().unwrap().enter(|tcx| {
-            if self.target_crate {
-                // cargo-miri has patched the compiler flags to make these into check-only builds,
-                // but we are still emulating regular rustc builds, which would perform post-mono
-                // const-eval during collection. So let's also do that here, even if we might be
-                // running with `--emit=metadata`. In particular this is needed to make
-                // `compile_fail` doc tests trigger post-mono errors.
-                // In general `collect_and_partition_mono_items` is not safe to call in check-only
-                // builds, but we are setting `-Zalways-encode-mir` which avoids those issues.
-                let _ = tcx.collect_and_partition_mono_items(());
-            }
-        });
+        if self.target_crate {
+            // cargo-miri has patched the compiler flags to make these into check-only builds,
+            // but we are still emulating regular rustc builds, which would perform post-mono
+            // const-eval during collection. So let's also do that here, even if we might be
+            // running with `--emit=metadata`. In particular this is needed to make
+            // `compile_fail` doc tests trigger post-mono errors.
+            // In general `collect_and_partition_mono_items` is not safe to call in check-only
+            // builds, but we are setting `-Zalways-encode-mir` which avoids those issues.
+            let _ = tcx.collect_and_partition_mono_items(());
+        }
         Compilation::Continue
     }
 }
@@ -321,6 +315,8 @@ fn jemalloc_magic() {
     // <https://github.com/rust-lang/rust/blob/e89bd9428f621545c979c0ec686addc6563a394e/compiler/rustc/src/main.rs#L39>.
     // See there for further comments.
     use std::os::raw::{c_int, c_void};
+
+    use tikv_jemalloc_sys as jemalloc_sys;
 
     #[used]
     static _F1: unsafe extern "C" fn(usize, usize) -> *mut c_void = jemalloc_sys::calloc;

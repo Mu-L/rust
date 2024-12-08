@@ -343,6 +343,9 @@ parse_incorrect_semicolon =
     .suggestion = remove this semicolon
     .help = {$name} declarations are not followed by a semicolon
 
+parse_incorrect_type_on_self = type not allowed for shorthand `self` parameter
+    .suggestion = move the modifiers on `self` to the type
+
 parse_incorrect_use_of_await = incorrect use of `await`
     .parentheses_suggestion = `await` is not a method call, remove the parentheses
 
@@ -715,6 +718,10 @@ parse_require_colon_after_labeled_expression = labeled expression must be follow
     .note = labels are used before loops and blocks, allowing e.g., `break 'label` to them
     .label = the label
     .suggestion = add `:` after the label
+
+parse_reserved_multihash = reserved multi-hash token is forbidden
+    .note = sequences of two or more # are reserved for future use since Rust 2024
+    .suggestion_whitespace = consider inserting whitespace here
 
 parse_reserved_string = invalid string literal
     .note = unprefixed guarded string literals are reserved for future use since Rust 2024

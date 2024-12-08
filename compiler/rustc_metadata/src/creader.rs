@@ -799,20 +799,16 @@ impl<'a, 'tcx> CrateLoader<'a, 'tcx> {
         self.inject_dependency_if(cnum, "a panic runtime", &|data| data.needs_panic_runtime());
     }
 
-    fn inject_profiler_runtime(&mut self, krate: &ast::Crate) {
-        if self.sess.opts.unstable_opts.no_profiler_runtime
-            || !(self.sess.instrument_coverage() || self.sess.opts.cg.profile_generate.enabled())
-        {
+    fn inject_profiler_runtime(&mut self) {
+        let needs_profiler_runtime =
+            self.sess.instrument_coverage() || self.sess.opts.cg.profile_generate.enabled();
+        if !needs_profiler_runtime || self.sess.opts.unstable_opts.no_profiler_runtime {
             return;
         }
 
         info!("loading profiler");
 
         let name = Symbol::intern(&self.sess.opts.unstable_opts.profiler_runtime);
-        if name == sym::profiler_builtins && attr::contains_name(&krate.attrs, sym::no_core) {
-            self.dcx().emit_err(errors::ProfilerBuiltinsNeedsCore);
-        }
-
         let Some(cnum) = self.resolve_crate(name, DUMMY_SP, CrateDepKind::Implicit) else {
             return;
         };
@@ -865,8 +861,10 @@ impl<'a, 'tcx> CrateLoader<'a, 'tcx> {
         // First up we check for global allocators. Look at the crate graph here
         // and see what's a global allocator, including if we ourselves are a
         // global allocator.
-        let mut global_allocator =
-            self.cstore.has_global_allocator.then(|| Symbol::intern("this crate"));
+        #[cfg_attr(not(bootstrap), allow(rustc::symbol_intern_string_literal))]
+        let this_crate = Symbol::intern("this crate");
+
+        let mut global_allocator = self.cstore.has_global_allocator.then_some(this_crate);
         for (_, data) in self.cstore.iter_crate_data() {
             if data.has_global_allocator() {
                 match global_allocator {
@@ -880,8 +878,7 @@ impl<'a, 'tcx> CrateLoader<'a, 'tcx> {
                 }
             }
         }
-        let mut alloc_error_handler =
-            self.cstore.has_alloc_error_handler.then(|| Symbol::intern("this crate"));
+        let mut alloc_error_handler = self.cstore.has_alloc_error_handler.then_some(this_crate);
         for (_, data) in self.cstore.iter_crate_data() {
             if data.has_alloc_error_handler() {
                 match alloc_error_handler {
@@ -1046,7 +1043,7 @@ impl<'a, 'tcx> CrateLoader<'a, 'tcx> {
 
     pub fn postprocess(&mut self, krate: &ast::Crate) {
         self.inject_forced_externs();
-        self.inject_profiler_runtime(krate);
+        self.inject_profiler_runtime();
         self.inject_allocator_crate(krate);
         self.inject_panic_runtime(krate);
 
@@ -1172,7 +1169,7 @@ fn attempt_load_dylib(path: &Path) -> Result<libloading::Library, libloading::Er
         // the expected format is lib<name>.a(libname.so) for the actual
         // dynamic library
         let library_name = path.file_stem().expect("expect a library name");
-        let mut archive_member = OsString::from("a(");
+        let mut archive_member = std::ffi::OsString::from("a(");
         archive_member.push(library_name);
         archive_member.push(".so)");
         let new_path = path.with_extension(archive_member);
