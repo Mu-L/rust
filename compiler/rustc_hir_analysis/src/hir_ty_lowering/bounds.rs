@@ -69,7 +69,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         search_bounds(hir_bounds);
         if let Some((self_ty, where_clause)) = self_ty_where_predicates {
             for clause in where_clause {
-                if let hir::WherePredicate::BoundPredicate(pred) = clause
+                if let hir::WherePredicateKind::BoundPredicate(pred) = clause.kind
                     && pred.is_param_bound(self_ty.to_def_id())
                 {
                     search_bounds(pred.bounds);
@@ -703,7 +703,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
 ///
 /// It might actually be possible that we can already support early-bound generic params
 /// in such types if we just lifted some more checks in other places, too, for example
-/// inside [`ty::Const::from_anon_const`]. However, even if that were the case, we should
+/// inside `HirTyLowerer::lower_anon_const`. However, even if that were the case, we should
 /// probably gate this behind another feature flag.
 ///
 /// [^1]: <https://github.com/rust-lang/project-const-generics/issues/28>.

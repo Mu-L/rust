@@ -55,24 +55,24 @@ pub fn exe(name: &str, target: TargetSelection) -> String {
 
 /// Returns `true` if the file name given looks like a dynamic library.
 pub fn is_dylib(path: &Path) -> bool {
-    path.extension().and_then(|ext| ext.to_str()).map_or(false, |ext| {
+    path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
         ext == "dylib" || ext == "so" || ext == "dll" || (ext == "a" && is_aix_shared_archive(path))
     })
 }
 
 fn is_aix_shared_archive(path: &Path) -> bool {
-    // FIXME(#133268): reading the entire file as &[u8] into memory seems excessive
-    // look into either mmap it or use the ReadCache
-    let data = match fs::read(path) {
-        Ok(data) => data,
-        Err(_) => return false,
-    };
-    let file = match ArchiveFile::parse(&*data) {
+    let file = match fs::File::open(path) {
         Ok(file) => file,
         Err(_) => return false,
     };
+    let reader = object::ReadCache::new(file);
+    let archive = match ArchiveFile::parse(&reader) {
+        Ok(result) => result,
+        Err(_) => return false,
+    };
 
-    file.members()
+    archive
+        .members()
         .filter_map(Result::ok)
         .any(|entry| String::from_utf8_lossy(entry.name()).contains(".so"))
 }
@@ -135,7 +135,7 @@ impl Drop for TimeIt {
     fn drop(&mut self) {
         let time = self.1.elapsed();
         if !self.0 {
-            println!("\tfinished in {}.{:03} seconds", time.as_secs(), time.subsec_millis());
+            eprintln!("\tfinished in {}.{:03} seconds", time.as_secs(), time.subsec_millis());
         }
     }
 }
@@ -267,12 +267,12 @@ pub fn check_run(cmd: &mut BootstrapCommand, print_cmd_on_fail: bool) -> bool {
     let status = match cmd.as_command_mut().status() {
         Ok(status) => status,
         Err(e) => {
-            println!("failed to execute command: {cmd:?}\nERROR: {e}");
+            eprintln!("failed to execute command: {cmd:?}\nERROR: {e}");
             return false;
         }
     };
     if !status.success() && print_cmd_on_fail {
-        println!(
+        eprintln!(
             "\n\ncommand did not execute successfully: {cmd:?}\n\
              expected success, got: {status}\n\n"
         );
