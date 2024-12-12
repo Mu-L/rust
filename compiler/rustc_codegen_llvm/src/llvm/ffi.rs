@@ -2240,6 +2240,7 @@ unsafe extern "C" {
         Output: *const c_char,
         DwoOutput: *const c_char,
         FileType: FileType,
+        VerifyIR: bool,
     ) -> LLVMRustResult;
     pub fn LLVMRustOptimize<'a>(
         M: &'a Module,
@@ -2316,7 +2317,7 @@ unsafe extern "C" {
 
     pub fn LLVMRustGetSMDiagnostic<'a>(
         DI: &'a DiagnosticInfo,
-        cookie_out: &mut c_uint,
+        cookie_out: &mut u64,
     ) -> &'a SMDiagnostic;
 
     pub fn LLVMRustUnpackSMDiagnostic(

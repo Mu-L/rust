@@ -585,6 +585,10 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
         self.trait_def(trait_def_id).implement_via_object
     }
 
+    fn trait_is_unsafe(self, trait_def_id: Self::DefId) -> bool {
+        self.trait_def(trait_def_id).safety == hir::Safety::Unsafe
+    }
+
     fn is_impl_trait_in_trait(self, def_id: DefId) -> bool {
         self.is_impl_trait_in_trait(def_id)
     }
@@ -1371,8 +1375,17 @@ impl<'tcx> GlobalCtxt<'tcx> {
         tls::enter_context(&icx, || f(icx.tcx))
     }
 
-    pub fn finish(&self) -> FileEncodeResult {
-        self.dep_graph.finish_encoding()
+    pub fn finish(&'tcx self) {
+        // We assume that no queries are run past here. If there are new queries
+        // after this point, they'll show up as "<unknown>" in self-profiling data.
+        self.enter(|tcx| tcx.alloc_self_profile_query_strings());
+
+        self.enter(|tcx| tcx.save_dep_graph());
+        self.enter(|tcx| tcx.query_key_hash_verify_all());
+
+        if let Err((path, error)) = self.dep_graph.finish_encoding() {
+            self.sess.dcx().emit_fatal(crate::error::FailedWritingFile { path: &path, error });
+        }
     }
 }
 
@@ -1466,7 +1479,7 @@ impl<'tcx> TyCtxt<'tcx> {
         self.mk_adt_def_from_data(ty::AdtDefData::new(self, did, kind, variants, repr))
     }
 
-    /// Allocates a read-only byte or string literal for `mir::interpret`.
+    /// Allocates a read-only byte or string literal for `mir::interpret` with alignment 1.
     /// Returns the same `AllocId` if called again with the same bytes.
     pub fn allocate_bytes_dedup(self, bytes: &[u8], salt: usize) -> interpret::AllocId {
         // Create an allocation that just contains these bytes.
@@ -1564,10 +1577,6 @@ impl<'tcx> TyCtxt<'tcx> {
             alloc_map: Lock::new(interpret::AllocMap::new()),
             current_gcx,
         }
-    }
-
-    pub fn consider_optimizing<T: Fn() -> String>(self, msg: T) -> bool {
-        self.sess.consider_optimizing(|| self.crate_name(LOCAL_CRATE), msg)
     }
 
     /// Obtain all lang items of this crate and all dependencies (recursively)
@@ -1950,8 +1959,6 @@ impl<'tcx> TyCtxt<'tcx> {
 
     #[inline]
     pub fn local_crate_exports_generics(self) -> bool {
-        debug_assert!(self.sess.opts.share_generics());
-
         self.crate_types().iter().any(|crate_type| {
             match crate_type {
                 CrateType::Executable

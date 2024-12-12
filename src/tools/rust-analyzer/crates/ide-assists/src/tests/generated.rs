@@ -187,8 +187,8 @@ enum Action { Move { distance: u32 }, Stop }
 
 fn handle(action: Action) {
     match action {
-        $0Action::Move { distance } => todo!(),
-        Action::Stop => todo!(),
+        Action::Move { distance } => ${1:todo!()},
+        Action::Stop => ${2:todo!()},$0
     }
 }
 "#####,
@@ -1392,7 +1392,7 @@ pub fn add(a: i32, b: i32) -> i32 { a + b }
 /// # Examples
 ///
 /// ```
-/// use test::add;
+/// use ra_test_fixture::add;
 ///
 /// assert_eq!(add(a, b), );
 /// ```

@@ -1364,6 +1364,7 @@ pub struct FieldDef {
     pub name: Symbol,
     pub vis: Visibility<DefId>,
     pub safety: hir::Safety,
+    pub value: Option<DefId>,
 }
 
 impl PartialEq for FieldDef {
@@ -1376,9 +1377,9 @@ impl PartialEq for FieldDef {
         // of `FieldDef` changes, a compile-error will be produced, reminding
         // us to revisit this assumption.
 
-        let Self { did: lhs_did, name: _, vis: _, safety: _ } = &self;
+        let Self { did: lhs_did, name: _, vis: _, safety: _, value: _ } = &self;
 
-        let Self { did: rhs_did, name: _, vis: _, safety: _ } = other;
+        let Self { did: rhs_did, name: _, vis: _, safety: _, value: _ } = other;
 
         let res = lhs_did == rhs_did;
 
@@ -1405,7 +1406,7 @@ impl Hash for FieldDef {
         // of `FieldDef` changes, a compile-error will be produced, reminding
         // us to revisit this assumption.
 
-        let Self { did, name: _, vis: _, safety: _ } = &self;
+        let Self { did, name: _, vis: _, safety: _, value: _ } = &self;
 
         did.hash(s)
     }
@@ -1558,10 +1559,7 @@ impl<'tcx> TyCtxt<'tcx> {
         let is_box = self.is_lang_item(did.to_def_id(), LangItem::OwnedBox);
 
         // This is here instead of layout because the choice must make it into metadata.
-        if is_box
-            || !self
-                .consider_optimizing(|| format!("Reorder fields of {:?}", self.def_path_str(did)))
-        {
+        if is_box {
             flags.insert(ReprFlags::IS_LINEAR);
         }
 

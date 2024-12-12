@@ -29,7 +29,7 @@ impl<T: ?Sized> *mut T {
     /// assert!(!ptr.is_null());
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_stable(feature = "const_ptr_is_null", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_ptr_is_null", since = "1.84.0")]
     #[rustc_diagnostic_item = "ptr_is_null"]
     #[inline]
     pub const fn is_null(self) -> bool {
@@ -94,7 +94,6 @@ impl<T: ?Sized> *mut T {
     /// // This dereference is UB. The pointer only has provenance for `x` but points to `y`.
     /// println!("{:?}", unsafe { &*bad });
     #[unstable(feature = "set_ptr_value", issue = "75091")]
-    #[cfg_attr(bootstrap, rustc_const_stable(feature = "ptr_metadata_const", since = "1.83.0"))]
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[inline]
     pub const fn with_metadata_of<U>(self, meta: *const U) -> *mut U
@@ -146,7 +145,7 @@ impl<T: ?Sized> *mut T {
     /// This is a [Strict Provenance][crate::ptr#strict-provenance] API.
     #[must_use]
     #[inline(always)]
-    #[stable(feature = "strict_provenance", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "strict_provenance", since = "1.84.0")]
     pub fn addr(self) -> usize {
         // A pointer-to-integer transmute currently has exactly the right semantics: it returns the
         // address without exposing the provenance. Note that this is *not* a stable guarantee about
@@ -179,7 +178,7 @@ impl<T: ?Sized> *mut T {
     ///
     /// [`with_exposed_provenance_mut`]: with_exposed_provenance_mut
     #[inline(always)]
-    #[stable(feature = "exposed_provenance", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "exposed_provenance", since = "1.84.0")]
     pub fn expose_provenance(self) -> usize {
         self.cast::<()>() as usize
     }
@@ -197,7 +196,7 @@ impl<T: ?Sized> *mut T {
     /// This is a [Strict Provenance][crate::ptr#strict-provenance] API.
     #[must_use]
     #[inline]
-    #[stable(feature = "strict_provenance", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "strict_provenance", since = "1.84.0")]
     pub fn with_addr(self, addr: usize) -> Self {
         // This should probably be an intrinsic to avoid doing any sort of arithmetic, but
         // meanwhile, we can implement it with `wrapping_offset`, which preserves the pointer's
@@ -216,7 +215,7 @@ impl<T: ?Sized> *mut T {
     /// This is a [Strict Provenance][crate::ptr#strict-provenance] API.
     #[must_use]
     #[inline]
-    #[stable(feature = "strict_provenance", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "strict_provenance", since = "1.84.0")]
     pub fn map_addr(self, f: impl FnOnce(usize) -> usize) -> Self {
         self.with_addr(f(self.addr()))
     }
@@ -271,7 +270,7 @@ impl<T: ?Sized> *mut T {
     /// }
     /// ```
     #[stable(feature = "ptr_as_ref", since = "1.9.0")]
-    #[rustc_const_stable(feature = "const_ptr_is_null", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_ptr_is_null", since = "1.84.0")]
     #[inline]
     pub const unsafe fn as_ref<'a>(self) -> Option<&'a T> {
         // SAFETY: the caller must guarantee that `self` is valid for a
@@ -343,7 +342,6 @@ impl<T: ?Sized> *mut T {
     /// ```
     #[inline]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
-    #[rustc_const_unstable(feature = "ptr_as_uninit", issue = "75402")]
     pub const unsafe fn as_uninit_ref<'a>(self) -> Option<&'a MaybeUninit<T>>
     where
         T: Sized,
@@ -619,7 +617,7 @@ impl<T: ?Sized> *mut T {
     /// println!("{s:?}"); // It'll print: "[4, 2, 3]".
     /// ```
     #[stable(feature = "ptr_as_ref", since = "1.9.0")]
-    #[rustc_const_stable(feature = "const_ptr_is_null", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_ptr_is_null", since = "1.84.0")]
     #[inline]
     pub const unsafe fn as_mut<'a>(self) -> Option<&'a mut T> {
         // SAFETY: the caller must guarantee that `self` is be valid for
@@ -677,7 +675,6 @@ impl<T: ?Sized> *mut T {
     /// the pointer is [convertible to a reference](crate::ptr#pointer-to-reference-conversion).
     #[inline]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
-    #[rustc_const_unstable(feature = "ptr_as_uninit", issue = "75402")]
     pub const unsafe fn as_uninit_mut<'a>(self) -> Option<&'a mut MaybeUninit<T>>
     where
         T: Sized,
@@ -1097,7 +1094,6 @@ impl<T: ?Sized> *mut T {
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
-    #[cfg_attr(bootstrap, rustc_allow_const_fn_unstable(unchecked_neg))]
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     pub const unsafe fn sub(self, count: usize) -> Self
@@ -1591,15 +1587,6 @@ impl<T: ?Sized> *mut T {
     /// beyond the allocation that the pointer points into. It is up to the caller to ensure that
     /// the returned offset is correct in all terms other than alignment.
     ///
-    /// When this is called during compile-time evaluation (which is unstable), the implementation
-    /// may return `usize::MAX` in cases where that can never happen at runtime. This is because the
-    /// actual alignment of pointers is not known yet during compile-time, so an offset with
-    /// guaranteed alignment can sometimes not be computed. For example, a buffer declared as `[u8;
-    /// N]` might be allocated at an odd or an even address, but at compile-time this is not yet
-    /// known, so the execution has to be correct for either choice. It is therefore impossible to
-    /// find an offset that is guaranteed to be 2-aligned. (This behavior is subject to change, as usual
-    /// for unstable APIs.)
-    ///
     /// # Panics
     ///
     /// The function panics if `align` is not a power-of-two.
@@ -1758,6 +1745,21 @@ impl<T> *mut [T] {
     #[rustc_const_stable(feature = "const_slice_ptr_len", since = "1.79.0")]
     pub const fn is_empty(self) -> bool {
         self.len() == 0
+    }
+
+    /// Gets a raw, mutable pointer to the underlying array.
+    ///
+    /// If `N` is not exactly equal to the length of `self`, then this method returns `None`.
+    #[unstable(feature = "slice_as_array", issue = "133508")]
+    #[inline]
+    #[must_use]
+    pub const fn as_mut_array<const N: usize>(self) -> Option<*mut [T; N]> {
+        if self.len() == N {
+            let me = self.as_mut_ptr() as *mut [T; N];
+            Some(me)
+        } else {
+            None
+        }
     }
 
     /// Divides one mutable raw slice into two at an index.
@@ -1949,7 +1951,6 @@ impl<T> *mut [T] {
     /// [allocated object]: crate::ptr#allocated-object
     #[inline]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
-    #[rustc_const_unstable(feature = "ptr_as_uninit", issue = "75402")]
     pub const unsafe fn as_uninit_slice<'a>(self) -> Option<&'a [MaybeUninit<T>]> {
         if self.is_null() {
             None
@@ -2001,7 +2002,6 @@ impl<T> *mut [T] {
     /// [allocated object]: crate::ptr#allocated-object
     #[inline]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
-    #[rustc_const_unstable(feature = "ptr_as_uninit", issue = "75402")]
     pub const unsafe fn as_uninit_slice_mut<'a>(self) -> Option<&'a mut [MaybeUninit<T>]> {
         if self.is_null() {
             None

@@ -25,8 +25,8 @@ use rustc_session::Session;
 use rustc_session::config::{
     self, Lto, OutputType, Passes, RemapPathScopeComponents, SplitDwarfKind, SwitchWithOptPath,
 };
-use rustc_span::InnerSpan;
 use rustc_span::symbol::sym;
+use rustc_span::{BytePos, InnerSpan, Pos, SpanData, SyntaxContext};
 use rustc_target::spec::{CodeModel, RelocModel, SanitizerSet, SplitDebuginfo, TlsModel};
 use tracing::debug;
 
@@ -61,6 +61,7 @@ fn write_output_file<'ll>(
     dwo_output: Option<&Path>,
     file_type: llvm::FileType,
     self_profiler_ref: &SelfProfilerRef,
+    verify_llvm_ir: bool,
 ) -> Result<(), FatalError> {
     debug!("write_output_file output={:?} dwo_output={:?}", output, dwo_output);
     unsafe {
@@ -79,6 +80,7 @@ fn write_output_file<'ll>(
             output_c.as_ptr(),
             dwo_output_ptr,
             file_type,
+            verify_llvm_ir,
         );
 
         // Record artifact sizes for self-profiling
@@ -413,21 +415,32 @@ fn report_inline_asm(
     cgcx: &CodegenContext<LlvmCodegenBackend>,
     msg: String,
     level: llvm::DiagnosticLevel,
-    mut cookie: u64,
+    cookie: u64,
     source: Option<(String, Vec<InnerSpan>)>,
 ) {
     // In LTO build we may get srcloc values from other crates which are invalid
     // since they use a different source map. To be safe we just suppress these
     // in LTO builds.
-    if matches!(cgcx.lto, Lto::Fat | Lto::Thin) {
-        cookie = 0;
-    }
+    let span = if cookie == 0 || matches!(cgcx.lto, Lto::Fat | Lto::Thin) {
+        SpanData::default()
+    } else {
+        let lo = BytePos::from_u32(cookie as u32);
+        let hi = BytePos::from_u32((cookie >> 32) as u32);
+        SpanData {
+            lo,
+            // LLVM version < 19 silently truncates the cookie to 32 bits in some situations.
+            hi: if hi.to_u32() != 0 { hi } else { lo },
+            ctxt: SyntaxContext::root(),
+            parent: None,
+        }
+    };
     let level = match level {
         llvm::DiagnosticLevel::Error => Level::Error,
         llvm::DiagnosticLevel::Warning => Level::Warning,
         llvm::DiagnosticLevel::Note | llvm::DiagnosticLevel::Remark => Level::Note,
     };
-    cgcx.diag_emitter.inline_asm_error(cookie.try_into().unwrap(), msg, level, source);
+    let msg = msg.strip_prefix("error: ").unwrap_or(&msg).to_string();
+    cgcx.diag_emitter.inline_asm_error(span, msg, level, source);
 }
 
 unsafe extern "C" fn diagnostic_handler(info: &DiagnosticInfo, user: *mut c_void) {
@@ -507,7 +520,7 @@ fn get_pgo_sample_use_path(config: &ModuleConfig) -> Option<CString> {
 }
 
 fn get_instr_profile_output_path(config: &ModuleConfig) -> Option<CString> {
-    config.instrument_coverage.then(|| CString::new("default_%m_%p.profraw").unwrap())
+    config.instrument_coverage.then(|| c"default_%m_%p.profraw".to_owned())
 }
 
 pub(crate) unsafe fn llvm_optimize(
@@ -840,6 +853,7 @@ pub(crate) unsafe fn codegen(
                         None,
                         llvm::FileType::AssemblyFile,
                         &cgcx.prof,
+                        config.verify_llvm_ir,
                     )
                 })?;
             }
@@ -877,6 +891,7 @@ pub(crate) unsafe fn codegen(
                             dwo_out,
                             llvm::FileType::ObjectFile,
                             &cgcx.prof,
+                            config.verify_llvm_ir,
                         )
                     })?;
                 }

@@ -22,6 +22,7 @@
 #![feature(array_windows)]
 #![feature(cfg_match)]
 #![feature(core_io_borrowed_buf)]
+#![feature(hash_set_entry)]
 #![feature(if_let_guard)]
 #![feature(let_chains)]
 #![feature(min_specialization)]
@@ -50,6 +51,7 @@ pub mod source_map;
 use source_map::{SourceMap, SourceMapInputs};
 
 pub use self::caching_source_map_view::CachingSourceMapView;
+use crate::fatal_error::FatalError;
 
 pub mod edition;
 use edition::Edition;
@@ -518,6 +520,12 @@ impl SpanData {
     /// Returns `true` if `self` fully encloses `other`.
     pub fn contains(self, other: Self) -> bool {
         self.lo <= other.lo && other.hi <= self.hi
+    }
+}
+
+impl Default for SpanData {
+    fn default() -> Self {
+        Self { lo: BytePos(0), hi: BytePos(0), ctxt: SyntaxContext::root(), parent: None }
     }
 }
 
@@ -2612,6 +2620,10 @@ impl ErrorGuaranteed {
     #[deprecated = "should only be used in `DiagCtxtInner::emit_diagnostic`"]
     pub fn unchecked_error_guaranteed() -> Self {
         ErrorGuaranteed(())
+    }
+
+    pub fn raise_fatal(self) -> ! {
+        FatalError.raise()
     }
 }
 

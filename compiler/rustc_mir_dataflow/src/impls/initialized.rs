@@ -1,7 +1,7 @@
 use std::assert_matches::assert_matches;
 
 use rustc_index::Idx;
-use rustc_index::bit_set::{BitSet, ChunkedBitSet};
+use rustc_index::bit_set::{BitSet, MixedBitSet};
 use rustc_middle::bug;
 use rustc_middle::mir::{self, Body, CallReturnPlaces, Location, TerminatorEdges};
 use rustc_middle::ty::{self, TyCtxt};
@@ -12,7 +12,7 @@ use crate::framework::SwitchIntEdgeEffects;
 use crate::move_paths::{HasMoveData, InitIndex, InitKind, LookupResult, MoveData, MovePathIndex};
 use crate::{
     Analysis, GenKill, MaybeReachable, drop_flag_effects, drop_flag_effects_for_function_entry,
-    drop_flag_effects_for_location, lattice, on_all_children_bits, on_lookup_result_bits,
+    drop_flag_effects_for_location, on_all_children_bits, on_lookup_result_bits,
 };
 
 /// `MaybeInitializedPlaces` tracks all places that might be
@@ -42,10 +42,10 @@ use crate::{
 /// }
 /// ```
 ///
-/// To determine whether a place *must* be initialized at a
-/// particular control-flow point, one can take the set-difference
-/// between this data and the data from `MaybeUninitializedPlaces` at the
-/// corresponding control-flow point.
+/// To determine whether a place is *definitely* initialized at a
+/// particular control-flow point, one can take the set-complement
+/// of the data from `MaybeUninitializedPlaces` at the corresponding
+/// control-flow point.
 ///
 /// Similarly, at a given `drop` statement, the set-intersection
 /// between this data and `MaybeUninitializedPlaces` yields the set of
@@ -70,7 +70,7 @@ impl<'a, 'tcx> MaybeInitializedPlaces<'a, 'tcx> {
     pub fn is_unwind_dead(
         &self,
         place: mir::Place<'tcx>,
-        state: &MaybeReachable<ChunkedBitSet<MovePathIndex>>,
+        state: &MaybeReachable<MixedBitSet<MovePathIndex>>,
     ) -> bool {
         if let LookupResult::Exact(path) = self.move_data().rev_lookup.find(place.as_ref()) {
             let mut maybe_live = false;
@@ -117,10 +117,10 @@ impl<'a, 'tcx> HasMoveData<'tcx> for MaybeInitializedPlaces<'a, 'tcx> {
 /// }
 /// ```
 ///
-/// To determine whether a place *must* be uninitialized at a
-/// particular control-flow point, one can take the set-difference
-/// between this data and the data from `MaybeInitializedPlaces` at the
-/// corresponding control-flow point.
+/// To determine whether a place is *definitely* uninitialized at a
+/// particular control-flow point, one can take the set-complement
+/// of the data from `MaybeInitializedPlaces` at the corresponding
+/// control-flow point.
 ///
 /// Similarly, at a given `drop` statement, the set-intersection
 /// between this data and `MaybeInitializedPlaces` yields the set of
@@ -165,57 +165,6 @@ impl<'a, 'tcx> MaybeUninitializedPlaces<'a, 'tcx> {
 }
 
 impl<'tcx> HasMoveData<'tcx> for MaybeUninitializedPlaces<'_, 'tcx> {
-    fn move_data(&self) -> &MoveData<'tcx> {
-        self.move_data
-    }
-}
-
-/// `DefinitelyInitializedPlaces` tracks all places that are definitely
-/// initialized upon reaching a particular point in the control flow
-/// for a function.
-///
-/// For example, in code like the following, we have corresponding
-/// dataflow information shown in the right-hand comments.
-///
-/// ```rust
-/// struct S;
-/// fn foo(pred: bool) {                        // definite-init:
-///                                             // {          }
-///     let a = S; let mut b = S; let c; let d; // {a, b      }
-///
-///     if pred {
-///         drop(a);                            // {   b,     }
-///         b = S;                              // {   b,     }
-///
-///     } else {
-///         drop(b);                            // {a,        }
-///         d = S;                              // {a,       d}
-///
-///     }                                       // {          }
-///
-///     c = S;                                  // {       c  }
-/// }
-/// ```
-///
-/// To determine whether a place *may* be uninitialized at a
-/// particular control-flow point, one can take the set-complement
-/// of this data.
-///
-/// Similarly, at a given `drop` statement, the set-difference between
-/// this data and `MaybeInitializedPlaces` yields the set of places
-/// that would require a dynamic drop-flag at that statement.
-pub struct DefinitelyInitializedPlaces<'a, 'tcx> {
-    body: &'a Body<'tcx>,
-    move_data: &'a MoveData<'tcx>,
-}
-
-impl<'a, 'tcx> DefinitelyInitializedPlaces<'a, 'tcx> {
-    pub fn new(body: &'a Body<'tcx>, move_data: &'a MoveData<'tcx>) -> Self {
-        DefinitelyInitializedPlaces { body, move_data }
-    }
-}
-
-impl<'a, 'tcx> HasMoveData<'tcx> for DefinitelyInitializedPlaces<'a, 'tcx> {
     fn move_data(&self) -> &MoveData<'tcx> {
         self.move_data
     }
@@ -293,23 +242,10 @@ impl<'tcx> MaybeUninitializedPlaces<'_, 'tcx> {
     }
 }
 
-impl<'a, 'tcx> DefinitelyInitializedPlaces<'a, 'tcx> {
-    fn update_bits(
-        trans: &mut <Self as Analysis<'tcx>>::Domain,
-        path: MovePathIndex,
-        state: DropFlagState,
-    ) {
-        match state {
-            DropFlagState::Absent => trans.kill(path),
-            DropFlagState::Present => trans.gen_(path),
-        }
-    }
-}
-
 impl<'tcx> Analysis<'tcx> for MaybeInitializedPlaces<'_, 'tcx> {
     /// There can be many more `MovePathIndex` than there are locals in a MIR body.
-    /// We use a chunked bitset to avoid paying too high a memory footprint.
-    type Domain = MaybeReachable<ChunkedBitSet<MovePathIndex>>;
+    /// We use a mixed bitset to avoid paying too high a memory footprint.
+    type Domain = MaybeReachable<MixedBitSet<MovePathIndex>>;
 
     const NAME: &'static str = "maybe_init";
 
@@ -320,7 +256,7 @@ impl<'tcx> Analysis<'tcx> for MaybeInitializedPlaces<'_, 'tcx> {
 
     fn initialize_start_block(&self, _: &mir::Body<'tcx>, state: &mut Self::Domain) {
         *state =
-            MaybeReachable::Reachable(ChunkedBitSet::new_empty(self.move_data().move_paths.len()));
+            MaybeReachable::Reachable(MixedBitSet::new_empty(self.move_data().move_paths.len()));
         drop_flag_effects_for_function_entry(self.body, self.move_data, |path, s| {
             assert!(s == DropFlagState::Present);
             state.gen_(path);
@@ -435,14 +371,14 @@ impl<'tcx> Analysis<'tcx> for MaybeInitializedPlaces<'_, 'tcx> {
 
 impl<'tcx> Analysis<'tcx> for MaybeUninitializedPlaces<'_, 'tcx> {
     /// There can be many more `MovePathIndex` than there are locals in a MIR body.
-    /// We use a chunked bitset to avoid paying too high a memory footprint.
-    type Domain = ChunkedBitSet<MovePathIndex>;
+    /// We use a mixed bitset to avoid paying too high a memory footprint.
+    type Domain = MixedBitSet<MovePathIndex>;
 
     const NAME: &'static str = "maybe_uninit";
 
     fn bottom_value(&self, _: &mir::Body<'tcx>) -> Self::Domain {
         // bottom = initialized (start_block_effect counters this at outset)
-        ChunkedBitSet::new_empty(self.move_data().move_paths.len())
+        MixedBitSet::new_empty(self.move_data().move_paths.len())
     }
 
     // sets on_entry bits for Arg places
@@ -554,80 +490,16 @@ impl<'tcx> Analysis<'tcx> for MaybeUninitializedPlaces<'_, 'tcx> {
     }
 }
 
-impl<'a, 'tcx> Analysis<'tcx> for DefinitelyInitializedPlaces<'a, 'tcx> {
-    /// Use set intersection as the join operator.
-    type Domain = lattice::Dual<BitSet<MovePathIndex>>;
-
-    const NAME: &'static str = "definite_init";
-
-    fn bottom_value(&self, _: &mir::Body<'tcx>) -> Self::Domain {
-        // bottom = initialized (start_block_effect counters this at outset)
-        lattice::Dual(BitSet::new_filled(self.move_data().move_paths.len()))
-    }
-
-    // sets on_entry bits for Arg places
-    fn initialize_start_block(&self, _: &mir::Body<'tcx>, state: &mut Self::Domain) {
-        state.0.clear();
-
-        drop_flag_effects_for_function_entry(self.body, self.move_data, |path, s| {
-            assert!(s == DropFlagState::Present);
-            state.0.insert(path);
-        });
-    }
-
-    fn apply_statement_effect(
-        &mut self,
-        trans: &mut Self::Domain,
-        _statement: &mir::Statement<'tcx>,
-        location: Location,
-    ) {
-        drop_flag_effects_for_location(self.body, self.move_data, location, |path, s| {
-            Self::update_bits(trans, path, s)
-        })
-    }
-
-    fn apply_terminator_effect<'mir>(
-        &mut self,
-        trans: &mut Self::Domain,
-        terminator: &'mir mir::Terminator<'tcx>,
-        location: Location,
-    ) -> TerminatorEdges<'mir, 'tcx> {
-        drop_flag_effects_for_location(self.body, self.move_data, location, |path, s| {
-            Self::update_bits(trans, path, s)
-        });
-        terminator.edges()
-    }
-
-    fn apply_call_return_effect(
-        &mut self,
-        trans: &mut Self::Domain,
-        _block: mir::BasicBlock,
-        return_places: CallReturnPlaces<'_, 'tcx>,
-    ) {
-        return_places.for_each(|place| {
-            // when a call returns successfully, that means we need to set
-            // the bits for that dest_place to 1 (initialized).
-            on_lookup_result_bits(
-                self.move_data(),
-                self.move_data().rev_lookup.find(place.as_ref()),
-                |mpi| {
-                    trans.gen_(mpi);
-                },
-            );
-        });
-    }
-}
-
 impl<'tcx> Analysis<'tcx> for EverInitializedPlaces<'_, 'tcx> {
     /// There can be many more `InitIndex` than there are locals in a MIR body.
-    /// We use a chunked bitset to avoid paying too high a memory footprint.
-    type Domain = ChunkedBitSet<InitIndex>;
+    /// We use a mixed bitset to avoid paying too high a memory footprint.
+    type Domain = MixedBitSet<InitIndex>;
 
     const NAME: &'static str = "ever_init";
 
     fn bottom_value(&self, _: &mir::Body<'tcx>) -> Self::Domain {
         // bottom = no initialized variables by default
-        ChunkedBitSet::new_empty(self.move_data().inits.len())
+        MixedBitSet::new_empty(self.move_data().inits.len())
     }
 
     fn initialize_start_block(&self, body: &mir::Body<'tcx>, state: &mut Self::Domain) {
