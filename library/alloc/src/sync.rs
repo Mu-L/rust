@@ -39,9 +39,6 @@ use crate::string::String;
 #[cfg(not(no_global_oom_handling))]
 use crate::vec::Vec;
 
-#[cfg(test)]
-mod tests;
-
 /// A soft limit on the amount of references that may be made to an `Arc`.
 ///
 /// Going above this limit will abort your program (although not
@@ -235,7 +232,7 @@ macro_rules! acquire {
 /// counting in general.
 ///
 /// [rc_examples]: crate::rc#examples
-#[cfg_attr(not(bootstrap), doc(search_unbox))]
+#[doc(search_unbox)]
 #[cfg_attr(not(test), rustc_diagnostic_item = "Arc")]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_insignificant_dtor]
@@ -787,7 +784,7 @@ impl<T, A: Allocator> Arc<T, A> {
         let uninit_ptr: NonNull<_> = (unsafe { &mut *uninit_raw_ptr }).into();
         let init_ptr: NonNull<ArcInner<T>> = uninit_ptr.cast();
 
-        let weak = Weak { ptr: init_ptr, alloc: alloc };
+        let weak = Weak { ptr: init_ptr, alloc };
 
         // It's important we don't give up ownership of the weak pointer, or
         // else the memory might be freed by the time `data_fn` returns. If
@@ -3618,7 +3615,7 @@ impl<T: Clone> From<&[T]> for Arc<[T]> {
 }
 
 #[cfg(not(no_global_oom_handling))]
-#[stable(feature = "shared_from_mut_slice", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "shared_from_mut_slice", since = "1.84.0")]
 impl<T: Clone> From<&mut [T]> for Arc<[T]> {
     /// Allocates a reference-counted slice and fills it by cloning `v`'s items.
     ///
@@ -3657,7 +3654,7 @@ impl From<&str> for Arc<str> {
 }
 
 #[cfg(not(no_global_oom_handling))]
-#[stable(feature = "shared_from_mut_slice", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "shared_from_mut_slice", since = "1.84.0")]
 impl From<&mut str> for Arc<str> {
     /// Allocates a reference-counted `str` and copies `v` into it.
     ///
