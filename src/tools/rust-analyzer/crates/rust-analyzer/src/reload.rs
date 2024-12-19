@@ -316,9 +316,7 @@ impl GlobalState {
                         LinkedProject::InlineJsonProject(it) => {
                             let workspace = project_model::ProjectWorkspace::load_inline(
                                 it.clone(),
-                                cargo_config.target.as_deref(),
-                                &cargo_config.extra_env,
-                                &cargo_config.cfg_overrides,
+                                &cargo_config,
                             );
                             Ok(workspace)
                         }
@@ -592,7 +590,7 @@ impl GlobalState {
             }
 
             watchers.extend(
-                iter::once(Config::user_config_path())
+                iter::once(Config::user_config_dir_path().as_deref())
                     .chain(self.workspaces.iter().map(|ws| ws.manifest().map(ManifestPath::as_ref)))
                     .flatten()
                     .map(|glob_pattern| lsp_types::FileSystemWatcher {
@@ -615,7 +613,11 @@ impl GlobalState {
         }
 
         let files_config = self.config.files();
-        let project_folders = ProjectFolders::new(&self.workspaces, &files_config.exclude);
+        let project_folders = ProjectFolders::new(
+            &self.workspaces,
+            &files_config.exclude,
+            Config::user_config_dir_path().as_deref(),
+        );
 
         if (self.proc_macro_clients.is_empty() || !same_workspaces)
             && self.config.expand_proc_macros()

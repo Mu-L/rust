@@ -7,7 +7,7 @@ use rustc_errors::Applicability;
 use rustc_hir::def_id::DefId;
 use rustc_hir::intravisit::{FnKind, Visitor, walk_expr, walk_fn, walk_item};
 use rustc_hir::{
-    self as hir, BlockCheckMode, BodyId, Expr, ExprKind, FnDecl, Impl, Item, ItemKind, Safety, UnsafeSource,
+    self as hir, BlockCheckMode, BodyId, Expr, ExprKind, FnDecl, Impl, Item, ItemKind, UnsafeSource,
 };
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::hir::nested_filter;
@@ -421,7 +421,7 @@ impl<'tcx> Visitor<'tcx> for UnsafeVisitor<'_, 'tcx> {
         id: LocalDefId,
     ) -> Self::Result {
         if let Some(header) = kind.header()
-            && header.safety == Safety::Unsafe
+            && header.safety.is_unsafe()
         {
             ControlFlow::Break(())
         } else {
@@ -505,17 +505,15 @@ fn typing_env_env_for_derived_eq(tcx: TyCtxt<'_>, did: DefId, eq_trait_id: DefId
         }
     }
 
-    let param_env = ParamEnv::new(
-        tcx.mk_clauses_from_iter(ty_predicates.iter().map(|&(p, _)| p).chain(
-            params.iter().filter(|&&(_, needs_eq)| needs_eq).map(|&(param, _)| {
-                ClauseKind::Trait(TraitPredicate {
-                    trait_ref: ty::TraitRef::new(tcx, eq_trait_id, [tcx.mk_param_from_def(param)]),
-                    polarity: ty::PredicatePolarity::Positive,
-                })
-                .upcast(tcx)
-            }),
-        )),
-    );
+    let param_env = ParamEnv::new(tcx.mk_clauses_from_iter(ty_predicates.iter().map(|&(p, _)| p).chain(
+        params.iter().filter(|&&(_, needs_eq)| needs_eq).map(|&(param, _)| {
+            ClauseKind::Trait(TraitPredicate {
+                trait_ref: ty::TraitRef::new(tcx, eq_trait_id, [tcx.mk_param_from_def(param)]),
+                polarity: ty::PredicatePolarity::Positive,
+            })
+            .upcast(tcx)
+        }),
+    )));
     ty::TypingEnv {
         typing_mode: ty::TypingMode::non_body_analysis(),
         param_env,

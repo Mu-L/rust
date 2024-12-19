@@ -379,7 +379,7 @@ pub fn eq_item_kind(l: &ItemKind, r: &ItemKind) -> bool {
         (Mod(lu, lmk), Mod(ru, rmk)) => {
             lu == ru
                 && match (lmk, rmk) {
-                    (ModKind::Loaded(litems, linline, _), ModKind::Loaded(ritems, rinline, _)) => {
+                    (ModKind::Loaded(litems, linline, _, _), ModKind::Loaded(ritems, rinline, _, _)) => {
                         linline == rinline && over(litems, ritems, |l, r| eq_item(l, r, eq_item_kind))
                     },
                     (ModKind::Unloaded, ModKind::Unloaded) => true,
@@ -661,8 +661,8 @@ pub fn eq_generics(l: &Generics, r: &Generics) -> bool {
 }
 
 pub fn eq_where_predicate(l: &WherePredicate, r: &WherePredicate) -> bool {
-    use WherePredicate::*;
-    match (l, r) {
+    use WherePredicateKind::*;
+    match (&l.kind, &r.kind) {
         (BoundPredicate(l), BoundPredicate(r)) => {
             over(&l.bound_generic_params, &r.bound_generic_params, |l, r| {
                 eq_generic_param(l, r)
@@ -872,8 +872,7 @@ pub fn eq_attr_args(l: &AttrArgs, r: &AttrArgs) -> bool {
     match (l, r) {
         (Empty, Empty) => true,
         (Delimited(la), Delimited(ra)) => eq_delim_args(la, ra),
-        (Eq(_, AttrArgsEq::Ast(le)), Eq(_, AttrArgsEq::Ast(re))) => eq_expr(le, re),
-        (Eq(_, AttrArgsEq::Hir(ll)), Eq(_, AttrArgsEq::Hir(rl))) => ll.kind == rl.kind,
+        (Eq { eq_span: _, expr: le }, Eq { eq_span: _, expr: re }) => eq_expr(le, re),
         _ => false,
     }
 }
