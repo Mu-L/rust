@@ -9,7 +9,7 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_hir as hir;
 use rustc_hir::def::{CtorKind, CtorOf, DefKind, Res};
 use rustc_hir::def_id::DefId;
-use rustc_hir::{Expr, FnDecl, LangItem, Safety, TyKind};
+use rustc_hir::{Expr, FnDecl, LangItem, TyKind};
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_lint::LateContext;
 use rustc_middle::mir::ConstValue;
@@ -38,7 +38,7 @@ pub use type_certainty::expr_type_is_certain;
 
 /// Checks if the given type implements copy.
 pub fn is_copy<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
-    ty.is_copy_modulo_regions(cx.tcx, cx.typing_env())
+    cx.type_is_copy_modulo_regions(ty)
 }
 
 /// This checks whether a given type is known to implement Debug.
@@ -226,7 +226,14 @@ pub fn implements_trait<'tcx>(
     trait_id: DefId,
     args: &[GenericArg<'tcx>],
 ) -> bool {
-    implements_trait_with_env_from_iter(cx.tcx, cx.typing_env(), ty, trait_id, None, args.iter().map(|&x| Some(x)))
+    implements_trait_with_env_from_iter(
+        cx.tcx,
+        cx.typing_env(),
+        ty,
+        trait_id,
+        None,
+        args.iter().map(|&x| Some(x)),
+    )
 }
 
 /// Same as `implements_trait` but allows using a `ParamEnv` different from the lint context.
@@ -524,7 +531,7 @@ pub fn peel_mid_ty_refs_is_mutable(ty: Ty<'_>) -> (Ty<'_>, usize, Mutability) {
 /// Returns `true` if the given type is an `unsafe` function.
 pub fn type_is_unsafe_function<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
     match ty.kind() {
-        ty::FnDef(..) | ty::FnPtr(..) => ty.fn_sig(cx.tcx).safety() == Safety::Unsafe,
+        ty::FnDef(..) | ty::FnPtr(..) => ty.fn_sig(cx.tcx).safety().is_unsafe(),
         _ => false,
     }
 }
@@ -1262,7 +1269,8 @@ pub fn make_normalized_projection_with_regions<'tcx>(
         }
         let cause = ObligationCause::dummy();
         let (infcx, param_env) = tcx.infer_ctxt().build_with_typing_env(typing_env);
-        match infcx.at(&cause, param_env)
+        match infcx
+            .at(&cause, param_env)
             .query_normalize(Ty::new_projection_from_args(tcx, ty.def_id, ty.args))
         {
             Ok(ty) => Some(ty.value),
@@ -1278,7 +1286,10 @@ pub fn make_normalized_projection_with_regions<'tcx>(
 pub fn normalize_with_regions<'tcx>(tcx: TyCtxt<'tcx>, typing_env: ty::TypingEnv<'tcx>, ty: Ty<'tcx>) -> Ty<'tcx> {
     let cause = ObligationCause::dummy();
     let (infcx, param_env) = tcx.infer_ctxt().build_with_typing_env(typing_env);
-    infcx.at(&cause, param_env).query_normalize(ty).map_or(ty, |ty| ty.value)
+    infcx
+        .at(&cause, param_env)
+        .query_normalize(ty)
+        .map_or(ty, |ty| ty.value)
 }
 
 /// Checks if the type is `core::mem::ManuallyDrop<_>`
